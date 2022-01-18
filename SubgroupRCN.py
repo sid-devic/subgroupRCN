@@ -3,22 +3,26 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize
 
 
-# make 2d linearly separable dataset inside square of length 2 centered at origin
-def makeLinearData(num_points, slope):
-    # find vec orthogonal to halfspace slope through origin
-    normal = np.array([1, -1/slope])
-    data = np.random.uniform(-1, 1, (num_points, 2))
+# uniformly sample num_points from nd cube and label with halfspace given by normal
+def uniformLinearData(dim, num_points, normal):
+    if dim != len(normal):
+        print('supply a normal with dimension', dim)
+        print('===')
+        return
+
+    data = np.random.uniform(-1, 1, (num_points, dim))
     dots = np.array([np.dot(normal, data[i]) for i in range(len(data))])
     labels = np.sign(dots)
 
-    return slope, data, labels
+    return data, labels
 
 
-def plotLinearData(halfspace, data, labels):
+def plot2dLinearData(normal, data, labels):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     x = np.linspace(-10, 10, 100)
-    y = x * halfspace
+    y = x * -(normal[0] / normal[1])
+
     for i in range(len(data)):
         if labels[i] == 1:
             plt.plot(data[i][0], data[i][1], 'g+', mew=1, ms=10)
@@ -26,18 +30,20 @@ def plotLinearData(halfspace, data, labels):
             plt.plot(data[i][0], data[i][1], 'b_', mew=1, ms=10)
         else:
             print('something went wrong')
+
+    # plot halfspace
     plt.plot(x, y, 'r')
     plt.xlim([-1, 1])
     plt.ylim([-1, 1])
     plt.show()
 
 
-def plotComputedHalfspace(generator_halfspace, computed_halfspace, data, labels):
+def plotComputedHalfspace(generator_normal, computed_normal, data, labels):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     x = np.linspace(-10, 10, 100)
-    gen_y = x * generator_halfspace
-    comp_y = x * computed_halfspace
+    gen_y = x * -(generator_normal[0] / generator_normal[1])
+    comp_y = x * -(computed_normal[0] / computed_normal[1])
     for i in range(len(data)):
         if labels[i] == 1:
             plt.plot(data[i][0], data[i][1], 'g+', mew=1, ms=10)
@@ -53,13 +59,13 @@ def plotComputedHalfspace(generator_halfspace, computed_halfspace, data, labels)
     plt.show()
 
 
-def plotSRCNComputedHalfspace(generator_halfspace, noise_halfspace, computed_halfspace, data, labels):
+def plotSRCNComputedHalfspace(generator_normal, noise_normal, computed_normal, data, labels):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     x = np.linspace(-10, 10, 100)
-    gen_y = x * generator_halfspace
-    noise_y = x * noise_halfspace
-    comp_y = x * computed_halfspace
+    gen_y = x * -(generator_normal[0] / generator_normal[1])
+    noise_y = x * -(noise_normal[0] / noise_normal[1])
+    comp_y = x * -(computed_normal[0] / computed_normal[1])
     for i in range(len(data)):
         if labels[i] == 1:
             plt.plot(data[i][0], data[i][1], 'g+', mew=1, ms=10)
@@ -89,11 +95,10 @@ def addRCN(labels, eta):
 
 
 # add SRCN halfspace noise w.p. eta.
-# param: halfspace is slope of some labeling generator hyperplane passing through origin
-def addSRCNHalfspace(data, labels, eta, halfspace):
+# param: halfspace is normal of some labeling generator hyperplane passing through origin
+def addSRCNHalfspace(data, labels, eta, normal):
     noisy_labels = labels.copy()
     # find vec orthogonal to halfspace slope through origin
-    normal = np.array([1, halfspace])
     dots = np.array([np.dot(normal, data[i]) for i in range(len(data))])
     applyNoise = np.sign(dots)
 
@@ -128,7 +133,7 @@ def rcnOptimize(lam, data, labels):
                    x0,
                    args=tuple([lam, data, labels]),
                    options={'disp': True},
-                   tol=1e-8)
+                   )
 
     return res.x
 
@@ -139,26 +144,32 @@ def accuracy(data, labels, w):
 
 
 # generate synthetic data iter times and return average of all accuracies
-def experiment2dimSynthetic(iter, eta, plot=False):
+def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False):
     gen_og = []
     gen_noisy = []
     comp_og = []
     comp_noisy = []
+
     for _ in range(iter):
-        # generate random halfspace through origin by specifying a slope
-        theta = np.random.uniform(0, 360)
-        slope = (np.sin(theta) / np.cos(theta))
-        normal_w = np.array([1, -1/slope])
+        # generate random normal for labeling points
+        normal_w = np.random.uniform(-1, 1, (dim, ))
+        print('normal', normal_w)
         # use halfspace to label data
+        # convergence guarantees for leakyRelu of param lam=eta Appx. A: https://arxiv.org/pdf/1906.10075.pdf
         lam = eta
-        halfspace, data, labels = makeLinearData(75, slope)
-        # noisy_labels = addRCN(labels, eta)
+        data, labels = uniformLinearData(dim=dim, num_points=points_per_iter, normal=normal_w)
 
-        # theta_noise = np.random.uniform(0, 360)
-        # slope_noise = (np.sin(theta_noise) / np.cos(theta_noise))
-        noisy_labels = addSRCNHalfspace(data, labels, eta, halfspace)
+        if noiseType == 'RCN':
+            noisy_labels = addRCN(labels, eta)
+        elif noiseType == 'SRCN':
+            # random normal for noise
+            noise_normal_w = np.random.uniform(-1, 1, (dim,))
+            noisy_labels = addSRCNHalfspace(data, labels, eta, noise_normal_w)
+        else:
+            print('unexpected noise type ', noiseType)
+            raise
+
         comp_normal_w = rcnOptimize(lam, data, labels)
-
         gen_og.append(accuracy(data, labels, normal_w))
         gen_noisy.append(accuracy(data, noisy_labels, normal_w))
         comp_og.append(accuracy(data, labels, comp_normal_w))
@@ -168,19 +179,32 @@ def experiment2dimSynthetic(iter, eta, plot=False):
         print('acc of comp on og', comp_og[-1])
         print('acc of comp on noisy:', comp_noisy[-1])
 
-        if plot:
-            w_slope = comp_normal_w[1] / comp_normal_w[0]
-            print(slope, -1/w_slope)
-            plotSRCNComputedHalfspace(slope, -1/slope, -1/w_slope, data, noisy_labels)
-            # plotComputedHalfspace(slope, -1/w_slope, data, noisy_labels)
+        if plot and dim == 2:
+            if noiseType == 'RCN':
+                plotComputedHalfspace(normal_w, comp_normal_w, data, noisy_labels)
+            elif noiseType == 'SRCN':
+                plotSRCNComputedHalfspace(normal_w, noise_normal_w, comp_normal_w, data, noisy_labels)
+            else:
+                print('unexpected noise type ', noiseType)
+                raise
 
+    table_data = [
+        ['halfspace', 'noise', 'acc'],
+        ['gen', 'og', round(sum(gen_og) / len(gen_og), 3)],
+        ['gen', eta, round(sum(gen_noisy) / len(gen_noisy), 3)],
+        ['comp', 'og', round(sum(comp_og) / len(comp_og), 3)],
+        ['comp', eta, round(sum(comp_noisy) / len(comp_noisy), 3)]
+    ]
     print('====')
-    print('eta =', eta)
-    print('avg acc gen on og', sum(gen_og) / len(gen_og))
-    print('avg acc gen on noisy', sum(gen_noisy) / len(gen_noisy))
-    print('avg acc comp on og', sum(comp_og) / len(comp_og))
-    print('avg acc comp on noisy', sum(comp_noisy) / len(comp_noisy))
+    print('dim =', dim)
+    for row in table_data:
+        print("{: >8} {: >8} {: >8}".format(*row))
 
 
 if __name__ == '__main__':
-    experiment2dimSynthetic(1, 0.3, True)
+    runExperiment(dim=5,
+                  iter=100,
+                  points_per_iter=75,
+                  eta=0.3,
+                  noiseType='SRCN',
+                  plot=False)
