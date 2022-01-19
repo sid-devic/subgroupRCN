@@ -155,7 +155,7 @@ def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False, verbos
         # generate random normal for labeling points
         normal_w = np.random.uniform(-1, 1, (dim, ))
         # use halfspace to label data
-        # convergence guarantees for leakyRelu of param lam=eta Appx. A: https://arxiv.org/pdf/1906.10075.pdf
+        # convergence guarantees for leakyRelu of param lam=eta see Appx. A: https://arxiv.org/pdf/1906.10075.pdf
         lam = eta
         data, labels = uniformLinearData(dim=dim, num_points=points_per_iter, normal=normal_w)
 
