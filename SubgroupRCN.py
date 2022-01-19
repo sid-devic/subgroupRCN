@@ -122,7 +122,7 @@ def rcnObj(w, lam, data, labels):
 
 
 # optimize leaky relu with sklearn.optimize to find halfspace on noisy data
-def rcnOptimize(lam, data, labels):
+def rcnOptimize(lam, data, labels, verbose):
     dim = len(data[0])
     x0 = np.array([0.1 for d in range(dim)])
     # cons = (
@@ -132,7 +132,7 @@ def rcnOptimize(lam, data, labels):
     res = minimize(rcnObj,
                    x0,
                    args=tuple([lam, data, labels]),
-                   options={'disp': True},
+                   options={'disp': verbose}
                    )
 
     return res.x
@@ -144,16 +144,16 @@ def accuracy(data, labels, w):
 
 
 # generate synthetic data iter times and return average of all accuracies
-def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False):
+def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False, verbose=False):
     gen_og = []
     gen_noisy = []
     comp_og = []
     comp_noisy = []
+    orthogonalNoise = False
 
     for _ in range(iter):
         # generate random normal for labeling points
         normal_w = np.random.uniform(-1, 1, (dim, ))
-        print('normal', normal_w)
         # use halfspace to label data
         # convergence guarantees for leakyRelu of param lam=eta Appx. A: https://arxiv.org/pdf/1906.10075.pdf
         lam = eta
@@ -162,22 +162,27 @@ def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False):
         if noiseType == 'RCN':
             noisy_labels = addRCN(labels, eta)
         elif noiseType == 'SRCN':
-            # random normal for noise
-            noise_normal_w = np.random.uniform(-1, 1, (dim,))
+            if orthogonalNoise:
+                noise_normal_w = 0
+            else:
+                # random normal for noise
+                noise_normal_w = np.random.uniform(-1, 1, (dim,))
             noisy_labels = addSRCNHalfspace(data, labels, eta, noise_normal_w)
         else:
             print('unexpected noise type ', noiseType)
             raise
 
-        comp_normal_w = rcnOptimize(lam, data, labels)
+        comp_normal_w = rcnOptimize(lam, data, labels, verbose)
         gen_og.append(accuracy(data, labels, normal_w))
         gen_noisy.append(accuracy(data, noisy_labels, normal_w))
         comp_og.append(accuracy(data, labels, comp_normal_w))
         comp_noisy.append(accuracy(data, noisy_labels, comp_normal_w))
-        print('acc of gen on og', gen_og[-1])
-        print('acc of gen on noisy:', gen_noisy[-1])
-        print('acc of comp on og', comp_og[-1])
-        print('acc of comp on noisy:', comp_noisy[-1])
+        if verbose:
+            print('normal', normal_w)
+            print('acc of gen on og', gen_og[-1])
+            print('acc of gen on noisy:', gen_noisy[-1])
+            print('acc of comp on og', comp_og[-1])
+            print('acc of comp on noisy:', comp_noisy[-1])
 
         if plot and dim == 2:
             if noiseType == 'RCN':
@@ -189,22 +194,24 @@ def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False):
                 raise
 
     table_data = [
+        ['dim={0}'.format(dim), 'noise={0} eta={1}'.format(noiseType, eta), 'iter={0}'.format(iter)],
+        ['==============================', '', ''],
         ['halfspace', 'noise', 'acc'],
         ['gen', 'og', round(sum(gen_og) / len(gen_og), 3)],
         ['gen', eta, round(sum(gen_noisy) / len(gen_noisy), 3)],
         ['comp', 'og', round(sum(comp_og) / len(comp_og), 3)],
         ['comp', eta, round(sum(comp_noisy) / len(comp_noisy), 3)]
     ]
-    print('====')
-    print('dim =', dim)
+    print('==============================')
     for row in table_data:
         print("{: >8} {: >8} {: >8}".format(*row))
 
 
 if __name__ == '__main__':
-    runExperiment(dim=5,
-                  iter=100,
-                  points_per_iter=75,
-                  eta=0.3,
-                  noiseType='SRCN',
-                  plot=False)
+    for eta in [0, 0.1, 0.2, 0.3, 0.4, 0.45]:
+        runExperiment(dim=10,
+                      iter=100,
+                      points_per_iter=75,
+                      eta=eta,
+                      noiseType='SRCN',
+                      plot=False)
