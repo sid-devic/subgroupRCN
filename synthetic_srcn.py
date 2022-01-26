@@ -17,7 +17,34 @@ def uniformLinearData(dim, num_points, normal):
     return data, labels
 
 
-def plot2dLinearData(normal, data, labels):
+# synthetic experiment input distribution from ankur's paper
+# https://github.com/secanth/massart/blob/master/experiment.py
+# d: dimension of instance
+# N: number of points in train set
+# frac: 0.25*N is number of points in test set
+def mixture_gauss(d, N, frac=0.25):
+    total = int(N * (frac + 1))
+    cov1 = np.eye(d)
+    cov2 = np.eye(d)
+    cov2[0, 0] = 8.
+    cov2[0, 1] = 0.1
+    cov2[1, 0] = 0.1
+    cov2[1, 1] = 0.0024
+    vecs = np.zeros((total, d))
+    for i in range(total):
+        if np.random.uniform() > 0.5:
+            vecs[i, :] = np.random.multivariate_normal([0] * d, cov1)
+        else:
+            vecs[i, :] = np.random.multivariate_normal([0] * d, cov2)
+    x_train = vecs[:N, :]
+    x_test = vecs[N:, :]
+    y_train = (vecs[:N, 1] > 0).astype(int) * 2 - 1
+    y_test = (vecs[N:, 1] > 0).astype(int) * 2 - 1
+
+    return x_train, x_test, y_train, y_test
+
+
+def plot2dLinearData(normal, data, labels, lims=None):
     fig = plt.figure()
     ax = fig.add_subplot(1, 1, 1)
     x = np.linspace(-10, 10, 100)
@@ -33,8 +60,13 @@ def plot2dLinearData(normal, data, labels):
 
     # plot halfspace
     plt.plot(x, y, 'r')
-    plt.xlim([-1, 1])
-    plt.ylim([-1, 1])
+    if lims is not None:
+        plt.xlim([-lims[0], lims[0]])
+        plt.ylim([-lims[1], lims[1]])
+    else:
+        plt.xlim([-1, 1])
+        plt.ylim([-1, 1])
+
     plt.show()
 
 
@@ -98,7 +130,6 @@ def addRCN(labels, eta):
 # param: halfspace is normal of some labeling generator hyperplane passing through origin
 def addSRCNHalfspace(data, labels, eta, normal):
     noisy_labels = labels.copy()
-    # find vec orthogonal to halfspace slope through origin
     dots = np.array([np.dot(normal, data[i]) for i in range(len(data))])
     applyNoise = np.sign(dots)
 
@@ -153,7 +184,7 @@ def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False, verbos
 
     for _ in range(iter):
         # generate random normal for labeling points
-        normal_w = np.random.uniform(-1, 1, (dim, ))
+        normal_w = np.random.uniform(-1, 1, (dim,))
         # use halfspace to label data
         # convergence guarantees for leakyRelu of param lam=eta see Appx. A: https://arxiv.org/pdf/1906.10075.pdf
         lam = eta
@@ -207,11 +238,52 @@ def runExperiment(dim, iter, points_per_iter, eta, noiseType, plot=False, verbos
         print("{: >8} {: >8} {: >8}".format(*row))
 
 
+def runMassartExperiment(dim, iter, points_per_iter, eta, plot=False):
+    train_acc = []
+    noisy_train_acc = []
+    noisy_test_acc = []
+
+    for _ in range(iter):
+        x_train, x_test, y_train, y_test = mixture_gauss(dim, points_per_iter)
+        x_train = np.array(x_train)
+        y_train = np.array(y_train)
+        x_test = np.array(x_test)
+        y_test = np.array(y_test)
+        lam = eta
+
+        def massartCorrupt(xs, ys):
+            noisy_y = ys.copy()
+            # apply massart noise as in ankur's paper
+            for idx in range(len(ys)):
+                if xs[idx, 1] > 0.3 and np.random.uniform(0, 1) < eta:
+                    noisy_y[idx] *= -1
+            return noisy_y
+
+        noisy_y_train = massartCorrupt(x_train, y_train)
+        noisy_y_test = massartCorrupt(x_test, y_test)
+
+        comp_normal_w = rcnOptimize(lam, x_train, noisy_y_train, verbose=False)
+        train_acc.append(accuracy(x_train, y_train, comp_normal_w))
+        noisy_train_acc.append(accuracy(x_train, noisy_y_train, comp_normal_w))
+        noisy_test_acc.append(accuracy(x_test, noisy_y_test, comp_normal_w))
+
+        if plot:
+            x_lim = np.abs(x_train[:, 0]).max()
+            y_lim = np.abs(x_train[:, 1]).max()
+            plot2dLinearData(comp_normal_w, x_train, noisy_y_train, lims=[x_lim, y_lim])
+
+    print('avg accuracy on no noise train', sum(train_acc) / len(train_acc))
+    print('avg accuracy on noisy train eta={0}'.format(eta), sum(noisy_train_acc) / len(noisy_train_acc))
+    print('avg accuracy on noisy test eta={0}'.format(eta), sum(noisy_test_acc) / len(noisy_test_acc))
+    print('')
+
 if __name__ == '__main__':
-    for eta in [0, 0.1, 0.2, 0.3, 0.4, 0.45]:
-        runExperiment(dim=10,
-                      iter=100,
-                      points_per_iter=75,
-                      eta=eta,
-                      noiseType='SRCN',
-                      plot=False)
+    # for eta in [0, 0.1, 0.2, 0.3, 0.4, 0.45]:
+    #     runExperiment(dim=10,
+    #                   iter=100,
+    #                   points_per_iter=75,
+    #                   eta=eta,
+    #                   noiseType='RCN',
+    #                   plot=False)
+    for eta in [0.05 * i for i in range(10)]:
+        runMassartExperiment(dim=2, iter=1, points_per_iter=1000, eta=eta, plot=True)
